@@ -1,0 +1,7 @@
+requests
+psycopg[binary]
+python-dotenv
+rapidfuzz
+beautifulsoup4
+feedparser
+ollama
