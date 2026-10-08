@@ -17,3 +17,15 @@ def extract_ig_handle(text):
         if h.lower() not in NOT_HANDLES:
             return h
     return None
+
+# Broad keyword filter for deal-like text. It's fine if it catches things that aren't deals;
+# the AI makes the final call. Add wording here whenever a real deal slips through.
+DEAL_WORDS = re.compile(
+    r"special|promo|deal|discount|coupon|happy hour|bogo|buy one|complimentary|\bfree\b|"
+    r"half[- ]?(price|off)|kids eat|reward|loyalty|"
+    r"\d+\s?% off|\$\d+\s?off|\d\s?for\s?\$\d+",
+    re.I,
+)
+
+def looks_like_deal(text):
+    return bool(text) and bool(DEAL_WORDS.search(text))
