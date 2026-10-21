@@ -37,8 +37,17 @@ class Deal(BaseModel):
 class DealList(BaseModel):
     deals: list[Deal]
 
+Match = Literal["yes", "no", "unsure", "none"]   # "none" = nothing to check
+
 class Verdict(BaseModel):
-    match: Literal["yes", "no", "unsure"]
+    website_match: Match
+    website_reason: str
+    instagram_match: Match
+    instagram_reason: str
+
+class LinkPick(BaseModel):
+    website: Optional[str] = None
+    instagram_handle: Optional[str] = None
     reason: str
 
 class QuotaExceeded(Exception):
@@ -69,12 +78,34 @@ Source text:
 VERIFY_PROMPT = """You check whether a website and an Instagram account belong to one specific restaurant.
 Restaurant: {name}
 Address: {address}, Boston, MA {zip_code}
+Website: {website}
 Website text (excerpt): {site_text}
+Instagram handle: {handle}
 Instagram bio: {bio}
 Website listed on the Instagram profile: {ig_website}
 
-Answer "yes" if the evidence clearly matches this restaurant at this address, "no" if it clearly belongs
-to a different place, and "unsure" otherwise. Give a one-sentence reason."""
+Judge the website and the Instagram account separately:
+- "yes" if the evidence clearly shows it belongs to this restaurant at this address
+- "no" if it clearly belongs to someone else (another location, another business, a food blogger, a directory)
+- "unsure" if the evidence isn't enough either way
+- "none" if there is nothing to check (no website, or no handle)
+Give a one-sentence reason for each."""
+
+PICK_PROMPT = """Below are web search results about a restaurant. Choose its official website and its own
+Instagram account.
+Restaurant: {name}
+Address: {address}, Boston, MA {zip_code}
+Known wrong links (never choose these): {rejected}
+
+Search results:
+{results}
+
+Rules:
+- Only choose a website or Instagram handle that appears in the search results above.
+- The website must be the restaurant's own site, not a directory, delivery app, or review site.
+- The Instagram account must be the restaurant's own (for this location, if it has several), not a food
+  blogger, a fan page, or another business.
+- Leave a field empty if no result clearly fits. Give a one-sentence reason."""
 
 # ---------- Internals ----------
 _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"]) if os.getenv("GEMINI_API_KEY") else None
@@ -166,38 +197,24 @@ def extract_deals(text, images=(), video=None):
     result = _ask(prompt, DealList, images, video)
     return result.deals if result else []
 
-def verify_match(name, address, zip_code, site_text, bio, ig_website):
-    """Return a Verdict: does this website + Instagram belong to this restaurant?"""
+def verify_match(name, address, zip_code, website, site_text, handle, bio, ig_website):
+    """Return a Verdict that judges the website and the Instagram handle separately."""
     prompt = VERIFY_PROMPT.format(name=name, address=address, zip_code=zip_code,
-                                  site_text=site_text or "none", bio=bio or "none",
+                                  website=website or "none", site_text=site_text or "none",
+                                  handle=handle or "none", bio=bio or "none",
                                   ig_website=ig_website or "none")
-    return _ask(prompt, Verdict) or Verdict(match="unsure", reason="AI reply could not be read")
+    return _ask(prompt, Verdict) or Verdict(
+        website_match="unsure" if website else "none", website_reason="AI reply could not be read",
+        instagram_match="unsure" if handle else "none", instagram_reason="AI reply could not be read")
+
+def pick_links(name, address, zip_code, results, rejected):
+    """Ask Gemini to choose the official website and Instagram from search results (when rules can't)."""
+    lines = [f"{n}. {r['title']} — {r['link']} — {r['snippet']}" for n, r in enumerate(results, 1)]
+    prompt = PICK_PROMPT.format(name=name, address=address, zip_code=zip_code,
+                                rejected=", ".join(rejected) or "none",
+                                results="\n".join(lines) or "no results")
+    return _ask(prompt, LinkPick) or LinkPick(reason="AI reply could not be read")
 
 def can_watch_video():
     """Only Gemini can watch videos, and only while its free limit lasts."""
     return _client is not None and not _gemini_exhausted
-
-class SearchUnavailable(Exception):
-    """This Gemini key can't use Google Search (not included, or turned off)."""
-
-def search_web(prompt):
-    """Ask Gemini a question it answers by searching Google. Returns the answer text."""
-    if _client is None:
-        raise SearchUnavailable("no GEMINI_API_KEY is set")
-    _wait()
-    try:
-        resp = _client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0,
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-            ),
-        )
-    except errors.APIError as e:
-        if e.code == 429:
-            raise QuotaExceeded()
-        if e.code in (400, 403):
-            raise SearchUnavailable(e.message)
-        raise
-    return resp.text or ""

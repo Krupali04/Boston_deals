@@ -1,4 +1,7 @@
 import re
+from urllib.parse import urlparse
+import requests
+from bs4 import BeautifulSoup
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; boston-deals-portfolio/0.1; taybos4811@gmail.com)"}
 
@@ -29,3 +32,21 @@ DEAL_WORDS = re.compile(
 
 def looks_like_deal(text):
     return bool(text) and bool(DEAL_WORDS.search(text))
+
+# Small web helpers used by several build scripts
+def page_text(url):
+    """A web page's visible text, or "" if it doesn't load."""
+    try:
+        html = requests.get(url if url.startswith("http") else "https://" + url, headers=UA, timeout=15).text
+    except requests.RequestException:
+        return ""
+    return " ".join(BeautifulSoup(html, "html.parser").get_text(" ").split())
+
+def address_on_page(address, text):
+    """True if the street number and first street word (e.g. "123 Tremont") appear in the text."""
+    m = re.match(r"\s*(\d+)\s+(\w+)", address or "")
+    return bool(m) and f"{m.group(1)} {m.group(2)}".lower() in text.lower()
+
+def domain(u):
+    """The site's domain without "www.", e.g. "maplestcafe.com"."""
+    return urlparse(u if u.startswith("http") else "https://" + u).netloc.lower().removeprefix("www.")
