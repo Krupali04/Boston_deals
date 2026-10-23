@@ -5,7 +5,7 @@ from common.utils import extract_ig_handle, page_text, address_on_page, domain
 from build.match_restaurants import norm
 from ingest.instagram import discover, RATE_LIMIT_CODES
 
-MAX_PER_RUN = 50        # restaurants per run (about 2 Serper searches each)
+MAX_PER_RUN = 1000        # restaurants per run (about 2 Serper searches each)
 MAX_SEARCHES = 2        # after this many searches, a restaurant stops being searched automatically
 RETRY_AFTER_DAYS = 30   # a restaurant where nothing was found is searched again after this long
 SITE_CANDIDATES = 3     # how many top website results to try
