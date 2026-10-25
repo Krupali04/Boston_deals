@@ -13,22 +13,26 @@ create table if not exists raw_osm_places (
 );
 
 create table if not exists dim_restaurants (
-  restaurant_id    bigserial primary key,
-  license_key      text unique,
-  name             text not null,
-  address          text,
-  zip              text,
-  lat              double precision,
-  lon              double precision,
-  osm_id           text,
-  website          text,
-  instagram_handle text,
-  ig_bio           text,
-  ig_website       text,
-  found_by         text,                       -- osm / website_scan / manual / ai
-  verified         text default 'unchecked',   -- yes / no / unsure / unchecked
-  verify_reason    text,
-  updated_at       timestamptz default now()
+  restaurant_id          bigserial primary key,
+  license_key            text unique,
+  name                   text not null,       -- from the city's license data
+  address                text,
+  zip                    text,
+  lat                    double precision,    -- map location, from the city
+  lon                    double precision,
+  website                text,                -- from Google (or typed in by you)
+  google_place_id        text,
+  google_status          text,                -- OPERATIONAL / CLOSED_TEMPORARILY / CLOSED_PERMANENTLY / NO_MATCH
+  google_checked_at      timestamptz,
+  instagram_handle       text,
+  found_by               text,                -- how the handle was found: website / search_ai / manual
+  ig_bio                 text,
+  ig_website             text,
+  ig_fetched_at          timestamptz,         -- when the Instagram collector last checked it
+  ai_search_attempted_at timestamptz,         -- when the handle search last ran for it
+  verified               text default 'unchecked',  -- unchecked / yes / needs_review / no (= set aside)
+  verify_reason          text,
+  updated_at             timestamptz default now()
 );
 
 create table if not exists raw_ig_posts (

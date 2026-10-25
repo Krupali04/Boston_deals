@@ -3,17 +3,17 @@ import requests
 from psycopg.types.json import Jsonb
 from common.db import get_conn
 
-RESOURCE_ID = "f1e13724-284d-478c-b8bc-ef042aa5b70b"
+RESOURCE_ID = "PASTE-RESOURCE-ID-HERE"
 API = "https://data.boston.gov/api/3/action/datastore_search"
 
-INSPECT = False            # first run: print columns and value counts, then switch to False
+INSPECT = False            # True only to print columns and value counts
 
 # Column names in Boston's food license data
 ZIP_FIELD = "zip"
 STATUS_FIELD = "licstatus"
 ACTIVE_VALUE = "Active"
 CATEGORY_FIELD = "descript"                 # the license type, e.g. "Eating & Drinking"
-KEEP_CATEGORIES = {"Eating & Drinking","Eating & Drinking w/ Take Out"}     # add the other restaurant/café types you see in the inspect output
+KEEP_CATEGORIES = {"Eating & Drinking", "Eating & Drinking w/ Take Out"}     # add the other restaurant/café types you see in the inspect output
 
 # The data has no license-number column, so each license gets a key built from these columns.
 # The date a license was added doesn't change, so name + address + that date identifies a license.
@@ -24,7 +24,7 @@ TARGET_ZIPS = {"02116", "02199", "02215", "02115"}   # Back Bay + Fenway
 def fetch_all():
     records, offset = [], 0
     while True:
-        r = requests.get(API, params={"resource_id": RESOURCE_ID, "limit": 1000, "offset": offset}, timeout=60)
+        r = requests.get(API, params={"resource_id": "f1e13724-284d-478c-b8bc-ef042aa5b70b", "limit": 1000, "offset": offset}, timeout=60)
         r.raise_for_status()
         batch = r.json()["result"]["records"]
         if not batch:

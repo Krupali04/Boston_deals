@@ -37,17 +37,9 @@ class Deal(BaseModel):
 class DealList(BaseModel):
     deals: list[Deal]
 
-Match = Literal["yes", "no", "unsure", "none"]   # "none" = nothing to check
-
-class Verdict(BaseModel):
-    website_match: Match
-    website_reason: str
-    instagram_match: Match
-    instagram_reason: str
-
-class LinkPick(BaseModel):
-    website: Optional[str] = None
-    instagram_handle: Optional[str] = None
+class HandlePick(BaseModel):
+    handle: Optional[str] = None
+    confidence: Literal["high", "medium", "low"]
     reason: str
 
 class QuotaExceeded(Exception):
@@ -75,37 +67,20 @@ anyone can use. Set confidence between 0 and 1. Return an empty list if there is
 Source text:
 {text}"""
 
-VERIFY_PROMPT = """You check whether a website and an Instagram account belong to one specific restaurant.
+HANDLE_PROMPT = """Below are web search results. Choose the official Instagram account of this restaurant or cafe.
 Restaurant: {name}
 Address: {address}, Boston, MA {zip_code}
-Website: {website}
-Website text (excerpt): {site_text}
-Instagram handle: {handle}
-Instagram bio: {bio}
-Website listed on the Instagram profile: {ig_website}
-
-Judge the website and the Instagram account separately:
-- "yes" if the evidence clearly shows it belongs to this restaurant at this address
-- "no" if it clearly belongs to someone else (another location, another business, a food blogger, a directory)
-- "unsure" if the evidence isn't enough either way
-- "none" if there is nothing to check (no website, or no handle)
-Give a one-sentence reason for each."""
-
-PICK_PROMPT = """Below are web search results about a restaurant. Choose its official website and its own
-Instagram account.
-Restaurant: {name}
-Address: {address}, Boston, MA {zip_code}
-Known wrong links (never choose these): {rejected}
 
 Search results:
 {results}
 
 Rules:
-- Only choose a website or Instagram handle that appears in the search results above.
-- The website must be the restaurant's own site, not a directory, delivery app, or review site.
-- The Instagram account must be the restaurant's own (for this location, if it has several), not a food
-  blogger, a fan page, or another business.
-- Leave a field empty if no result clearly fits. Give a one-sentence reason."""
+- Only choose a handle that appears in an instagram.com link in the results above.
+- It must be the restaurant's own account (for this location, if it has several), not a food blogger,
+  fan page, delivery app, or another business.
+- confidence: "high" if the name and the Boston location clearly match, "medium" if the name matches but
+  the location isn't confirmed, "low" if you are not sure.
+- Leave handle empty if no result fits. Give a one-sentence reason."""
 
 # ---------- Internals ----------
 _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"]) if os.getenv("GEMINI_API_KEY") else None
@@ -197,23 +172,12 @@ def extract_deals(text, images=(), video=None):
     result = _ask(prompt, DealList, images, video)
     return result.deals if result else []
 
-def verify_match(name, address, zip_code, website, site_text, handle, bio, ig_website):
-    """Return a Verdict that judges the website and the Instagram handle separately."""
-    prompt = VERIFY_PROMPT.format(name=name, address=address, zip_code=zip_code,
-                                  website=website or "none", site_text=site_text or "none",
-                                  handle=handle or "none", bio=bio or "none",
-                                  ig_website=ig_website or "none")
-    return _ask(prompt, Verdict) or Verdict(
-        website_match="unsure" if website else "none", website_reason="AI reply could not be read",
-        instagram_match="unsure" if handle else "none", instagram_reason="AI reply could not be read")
-
-def pick_links(name, address, zip_code, results, rejected):
-    """Ask Gemini to choose the official website and Instagram from search results (when rules can't)."""
+def pick_handle(name, address, zip_code, results):
+    """Ask Gemini to choose the restaurant's own Instagram account from search results."""
     lines = [f"{n}. {r['title']} — {r['link']} — {r['snippet']}" for n, r in enumerate(results, 1)]
-    prompt = PICK_PROMPT.format(name=name, address=address, zip_code=zip_code,
-                                rejected=", ".join(rejected) or "none",
-                                results="\n".join(lines) or "no results")
-    return _ask(prompt, LinkPick) or LinkPick(reason="AI reply could not be read")
+    prompt = HANDLE_PROMPT.format(name=name, address=address, zip_code=zip_code,
+                                  results="\n".join(lines) or "no results")
+    return _ask(prompt, HandlePick) or HandlePick(confidence="low", reason="AI reply could not be read")
 
 def can_watch_video():
     """Only Gemini can watch videos, and only while its free limit lasts."""
