@@ -1,0 +1,9 @@
+version: 2
+sources:
+  - name: raw
+    schema: public
+    tables:
+      - name: deals_extracted
+      - name: dim_restaurants
+      - name: raw_licenses
+      - name: raw_ig_posts

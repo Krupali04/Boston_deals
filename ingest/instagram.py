@@ -99,13 +99,17 @@ def main():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("select source_id from seen_posts where source_type = 'instagram'")
         seen = {row[0] for row in cur.fetchall()}
-        cur.execute("""select restaurant_id, instagram_handle from dim_restaurants
+        # One row per Instagram account: chain locations sharing a handle are checked once.
+        # Accounts with a never-checked location go first, then the ones checked longest ago.
+        cur.execute("""select min(instagram_handle) as handle, min(restaurant_id) as rid, count(*) as locations
+                       from dim_restaurants
                        where instagram_handle is not null and verified not in ('no', 'needs_review')
-                       order by ig_fetched_at nulls first, restaurant_id""")
-        restaurants = cur.fetchall()
-        print(f"{len(restaurants)} restaurants to check (about {len(restaurants) / 200:.1f} hours)")
+                       group by lower(instagram_handle)
+                       order by bool_or(ig_fetched_at is null) desc, min(ig_fetched_at), min(restaurant_id)""")
+        accounts = cur.fetchall()
+        print(f"{len(accounts)} Instagram accounts to check (about {len(accounts) / 200:.1f} hours)")
 
-        for rid, handle in restaurants:
+        for handle, rid, locations in accounts:
             if time.time() - start > MAX_RUN_SECONDS:
                 print("Time budget used — the rest will be checked first on the next run.")
                 break
@@ -122,23 +126,24 @@ def main():
             err = data.get("error")
             if err and err.get("code") == "timeout":
                 print(f"{handle}: {err['message']} — will retry next run")
-                continue                      # not marked as checked, so it goes first next time
+                continue
             if err:
                 print(f"{handle}: {err.get('message')}")
-                cur.execute("update dim_restaurants set ig_fetched_at = now() where restaurant_id = %s", (rid,))
+                cur.execute("update dim_restaurants set ig_fetched_at = now() where lower(instagram_handle) = lower(%s)",
+                            (handle,))
                 conn.commit()
                 continue
 
             bd = data["business_discovery"]
             cur.execute("""update dim_restaurants
                            set ig_bio = %s, ig_website = %s, ig_fetched_at = now()
-                           where restaurant_id = %s""",
-                        (bd.get("biography"), bd.get("website"), rid))
+                           where lower(instagram_handle) = lower(%s)""",
+                        (bd.get("biography"), bd.get("website"), handle))
             saved = 0
             for m in bd.get("media", {}).get("data", []):
                 posted = datetime.strptime(m["timestamp"], "%Y-%m-%dT%H:%M:%S%z")
                 if posted < cutoff or m["id"] in seen:
-                    continue   # too old for a current deal, or the AI has already read it
+                    continue
                 cur.execute(UPSERT, (
                     m["id"], rid, handle, m.get("media_type"), m.get("caption"), m.get("permalink"),
                     m.get("media_url"), m.get("thumbnail_url"),
@@ -146,7 +151,8 @@ def main():
                 ))
                 saved += 1
             conn.commit()
-            print(f"{handle}: {saved} new or waiting posts")
+            where = f" (shared by {locations} locations)" if locations > 1 else ""
+            print(f"{handle}: {saved} new or waiting posts{where}")
 
 if __name__ == "__main__":
     main()

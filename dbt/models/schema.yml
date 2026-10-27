@@ -1,0 +1,10 @@
+version: 2
+models:
+  - name: int_deals_deduped
+    columns:
+      - name: deal_key
+        data_tests: [unique, not_null]
+      - name: offer_type
+        data_tests:
+          - accepted_values:
+              values: ['BOGO', 'PERCENT_OFF', 'DOLLAR_OFF', 'FREE_ITEM', 'HAPPY_HOUR', 'FIRST_ORDER', 'BUNDLE', 'OTHER']

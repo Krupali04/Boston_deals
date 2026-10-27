@@ -1,0 +1,19 @@
+name: extract-once
+on:
+  workflow_dispatch:          # runs only when you click "Run workflow" in the Actions tab
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350        # the first backlog can take several hours
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+      AI_FALLBACK: none
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m extract.extract_deals

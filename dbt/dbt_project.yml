@@ -1,0 +1,10 @@
+name: boston_deals
+version: "1.0.0"
+profile: boston_deals
+model-paths: ["models"]
+models:
+  boston_deals:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
