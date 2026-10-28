@@ -1,0 +1,31 @@
+name: weekly-restaurants
+on:
+  schedule:
+    - cron: "0 3 * * 1"    # Mondays 03:00 UTC, hours before the daily run
+  workflow_dispatch:
+jobs:
+  restaurants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency: instagram-api
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+      SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      AI_FALLBACK: none
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m ingest.licenses
+      - run: python -m build.build_restaurants
+      - run: python -m build.google_lookup
+      - run: python -m build.find_instagram
+      - run: python -m build.find_missing_ai
+      - run: python -m build.cleanup

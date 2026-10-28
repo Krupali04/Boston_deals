@@ -1,0 +1,66 @@
+name: daily-pipeline
+on:
+  schedule:
+    - cron: "0 11 * * *"   # daily 11:00 UTC (7 AM Boston in summer, 6 AM in winter)
+  workflow_dispatch:
+jobs:
+  instagram:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    concurrency: instagram-api
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m ingest.instagram
+  websites:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m ingest.websites
+  extract:
+    needs: [instagram, websites]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+      AI_FALLBACK: none
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m extract.extract_deals
+  dbt:
+    needs: extract
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      DBT_HOST: ${{ secrets.DBT_HOST }}
+      DBT_USER: ${{ secrets.DBT_USER }}
+      DBT_PASSWORD: ${{ secrets.DBT_PASSWORD }}
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install dbt-postgres
+      - run: dbt build --profiles-dir .
