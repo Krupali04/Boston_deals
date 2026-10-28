@@ -1,7 +1,5 @@
 name: dbt-daily
-on:
-  schedule:
-    - cron: "0 20 * * *"     # every day at 20:00 UTC, after collection and extraction
+on:     # every day at 20:00 UTC, after collection and extraction
   workflow_dispatch:          # also lets you run it anytime from the Actions tab
 jobs:
   dbt:
