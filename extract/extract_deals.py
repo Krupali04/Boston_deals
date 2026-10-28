@@ -1,3 +1,4 @@
+import time
 from datetime import date
 import requests
 from common import ai
@@ -7,13 +8,29 @@ from common.utils import looks_like_deal
 class UrlExpired(Exception):
     pass
 
+DOWNLOAD_RETRIES = 3
+
 def download(url):
-    """Load an image or video into memory only; it is never saved to disk or the database."""
-    r = requests.get(url, timeout=60)
-    if r.status_code in (403, 404, 410):
-        raise UrlExpired(url)
-    r.raise_for_status()
-    return r.content
+    """Load an image or video into memory only; it is never saved to disk or the database.
+    A link that is expired, dead, or keeps failing raises UrlExpired: the post is skipped and gets
+    fresh links on the next Instagram collection."""
+    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        try:
+            r = requests.get(url, timeout=60)
+        except requests.RequestException:          # connection problem, timeout, or an address that doesn't exist
+            if attempt == DOWNLOAD_RETRIES:
+                raise UrlExpired(url)
+            time.sleep(5 * attempt)
+            continue
+        if r.status_code in (403, 404, 410):
+            raise UrlExpired(url)                  # the link has expired
+        if r.status_code >= 500 and attempt < DOWNLOAD_RETRIES:
+            time.sleep(5 * attempt)                # Instagram's image server had a hiccup
+            continue
+        if r.status_code != 200:
+            raise UrlExpired(url)
+        return r.content
+    raise UrlExpired(url)
 
 def image_urls(media_type, media_url, thumbnail_url, children):
     if media_type == "VIDEO":
