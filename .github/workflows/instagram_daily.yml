@@ -1,7 +1,5 @@
 name: instagram-daily
-on:
-  schedule:
-    - cron: "0 11 * * *"     # every day at 11:00 UTC (7 AM Boston in summer, 6 AM in winter)
+on:     # every day at 11:00 UTC (7 AM Boston in summer, 6 AM in winter)
   workflow_dispatch:          # also lets you run it anytime from the Actions tab
 jobs:
   instagram:
