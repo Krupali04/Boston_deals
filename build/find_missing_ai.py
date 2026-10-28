@@ -64,6 +64,9 @@ def main():
             except ai.QuotaExceeded:
                 print("Gemini limit reached — the rest will be searched on the next run.")
                 break
+            except ai.AITryLater as e:
+                print(f"{name}: Gemini didn't answer ({e}) — will retry next run")
+                continue
             except InstagramLimit:
                 print("Instagram rate limit reached — stopping for now.")
                 break

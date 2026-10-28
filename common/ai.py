@@ -6,6 +6,7 @@ import time
 from datetime import date
 from typing import Literal, Optional
 
+import httpx
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors, types
@@ -18,6 +19,8 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3-vl:8b")         # backup: text +
 FALLBACK = os.getenv("AI_FALLBACK", "none")                      # "ollama" on your laptop, "none" on GitHub
 SECONDS_BETWEEN_CALLS = float(os.getenv("GEMINI_SECONDS_BETWEEN_CALLS", "4"))
 INLINE_VIDEO_LIMIT = 18 * 1024 * 1024                            # larger videos go through Gemini's Files API
+RETRIES = 3                                                      # tries per Gemini call on network problems
+TEMPORARY_CODES = {500, 502, 503, 504}                           # Gemini server errors worth retrying
 
 # ---------- The fixed answer formats ----------
 OfferType = Literal["BOGO", "PERCENT_OFF", "DOLLAR_OFF", "FREE_ITEM", "HAPPY_HOUR", "FIRST_ORDER", "BUNDLE", "OTHER"]
@@ -44,6 +47,10 @@ class HandlePick(BaseModel):
 
 class QuotaExceeded(Exception):
     """Gemini's free limit is used up and no backup model is available."""
+
+class AITryLater(Exception):
+    """Gemini couldn't answer for this item right now (network problem, overload, or a refused request).
+    The caller should leave the item unread so it's retried on the next run."""
 
 # ---------- Prompts ----------
 DEAL_PROMPT = """Today is {today}. You extract restaurant and cafe deals from Instagram posts (caption plus any
@@ -135,6 +142,23 @@ def _gemini(prompt, schema, images, video):
         if uploaded is not None:
             _client.files.delete(name=uploaded.name)
 
+def _gemini_with_retries(prompt, schema, images, video):
+    """Call Gemini, retrying dropped connections, timeouts, and server overload a few times."""
+    problem = "no answer"
+    for attempt in range(1, RETRIES + 1):
+        try:
+            return _gemini(prompt, schema, images, video)
+        except errors.APIError as e:
+            if e.code not in TEMPORARY_CODES:
+                raise                                   # 429 (limit) and other errors are handled in _ask
+            problem = f"Gemini error {e.code}"
+        except (httpx.HTTPError, ConnectionError, TimeoutError) as e:
+            problem = type(e).__name__                  # e.g. the server disconnected without answering
+        if attempt < RETRIES:
+            print(f"  {problem} — retrying in {10 * attempt} seconds")
+            time.sleep(10 * attempt)
+    raise AITryLater(problem)
+
 def _ollama(prompt, schema, images):
     import ollama    # only needed when the backup is used
     msg = {"role": "user", "content": prompt}
@@ -150,10 +174,10 @@ def _ask(prompt, schema, images=(), video=None):
     raw = None
     if _client and not _gemini_exhausted:
         try:
-            raw = _gemini(prompt, schema, images, video)
+            raw = _gemini_with_retries(prompt, schema, images, video)
         except errors.APIError as e:
             if e.code != 429:
-                raise
+                raise AITryLater(f"Gemini error {e.code}: {e.message}")
             print("Gemini free limit reached for now.")
             _gemini_exhausted = True
     if raw is None:

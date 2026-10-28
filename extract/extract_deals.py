@@ -64,6 +64,25 @@ def read_post(media_type, caption, media_url, thumbnail_url, children):
             print(f"Video read failed, keeping the cover-image result: {e}")
     return deals
 
+MAX_FAILURES_IN_A_ROW = 5   # if Gemini fails this many items in a row, it's probably down: stop
+
+class GeminiDown(Exception):
+    pass
+
+_failures_in_a_row = 0
+
+def note_failure(label, err):
+    """An item couldn't be read right now: leave it unread, and stop if Gemini keeps failing."""
+    global _failures_in_a_row
+    _failures_in_a_row += 1
+    print(f"{label}: Gemini didn't answer ({err}) — left unread, will retry next run")
+    if _failures_in_a_row >= MAX_FAILURES_IN_A_ROW:
+        raise GeminiDown()
+
+def note_success():
+    global _failures_in_a_row
+    _failures_in_a_row = 0
+
 def do_instagram(conn, cur):
     cur.execute("""select post_id, restaurant_id, media_type, caption, media_url, thumbnail_url, children
                    from raw_ig_posts where not processed and status = 'new'""")
@@ -75,6 +94,10 @@ def do_instagram(conn, cur):
             conn.commit()
             print(f"IG {post_id}: link expired, will retry after the next collection")
             continue
+        except ai.AITryLater as e:
+            note_failure(f"IG {post_id}", e)
+            continue
+        note_success()
         save_deals(cur, "instagram", post_id, rid, deals)
         cur.execute("update raw_ig_posts set processed = true, status = 'done' where post_id = %s", (post_id,))
         mark_seen(cur, "instagram", post_id)
@@ -84,7 +107,12 @@ def do_instagram(conn, cur):
 def do_websites(conn, cur):
     cur.execute("select id, restaurant_id, url, content_hash, snippets from raw_web_pages where not processed")
     for page_id, rid, url, content_hash, snippets in cur.fetchall():
-        deals = ai.extract_deals(snippets)
+        try:
+            deals = ai.extract_deals(snippets)
+        except ai.AITryLater as e:
+            note_failure(f"Web {page_id}", e)
+            continue
+        note_success()
         save_deals(cur, "website", str(page_id), rid, deals)
         cur.execute("update raw_web_pages set processed = true where id = %s", (page_id,))
         mark_seen(cur, "website", f"{url}|{content_hash}")
@@ -94,7 +122,12 @@ def do_websites(conn, cur):
 def do_rss(conn, cur):
     cur.execute("select link, title, summary from raw_rss_items where not processed")
     for link, title, summary in cur.fetchall():
-        deals = ai.extract_deals(f"{title}\n\n{summary}")
+        try:
+            deals = ai.extract_deals(f"{title}\n\n{summary}")
+        except ai.AITryLater as e:
+            note_failure("RSS", e)
+            continue
+        note_success()
         save_deals(cur, "rss", link, None, deals)
         cur.execute("update raw_rss_items set processed = true where link = %s", (link,))
         mark_seen(cur, "rss", link)
@@ -109,6 +142,9 @@ def main():
             do_rss(conn, cur)
         except ai.QuotaExceeded:
             print("AI limit reached — unread items stay in the queue for the next run.")
+        except GeminiDown:
+            print(f"Gemini failed {MAX_FAILURES_IN_A_ROW} items in a row and seems to be down — "
+                  "stopping; unread items will be retried next run.")
 
 if __name__ == "__main__":
     main()
