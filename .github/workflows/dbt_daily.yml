@@ -1,0 +1,23 @@
+name: dbt-daily
+on:
+  schedule:
+    - cron: "0 20 * * *"     # every day at 20:00 UTC, after collection and extraction
+  workflow_dispatch:          # also lets you run it anytime from the Actions tab
+jobs:
+  dbt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DBT_HOST: ${{ secrets.DBT_HOST }}
+      DBT_USER: ${{ secrets.DBT_USER }}
+      DBT_PASSWORD: ${{ secrets.DBT_PASSWORD }}
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install dbt-postgres
+      - run: dbt build --profiles-dir .
